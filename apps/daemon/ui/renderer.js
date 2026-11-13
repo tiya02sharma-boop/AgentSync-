@@ -1,0 +1,403 @@
+import {
+  animateEntry,
+  animateExit,
+  animateReflow,
+  createActivityLine,
+  createAgentTile,
+  createDialogueLine,
+  flashTile,
+  setTileEnergy,
+  updateAgentTile,
+} from './components.js';
+import {
+  deriveAgentView,
+  displayName,
+  latestCollision,
+  negotiationFor,
+  speakerForFrame,
+  symbolName,
+} from './model.js';
+import { SpeechQueue } from './speech.js';
+
+const MAX_ACTIVITY = 180;
+const MAX_DIALOGUE = 80;
+/** Kept out of the activity feed entirely. Matches `ACTIVITY_IGNORED` in the daemon. */
+const ACTIVITY_HIDDEN = new Set(['HEARTBEAT']);
+document.body.dataset.platform = window.agentigram.platform || 'unknown';
+const elements = Object.fromEntries(
+  [
+    'projectName',
+    'link',
+    'counts',
+    'meetingClock',
+    'agentStage',
+    'emptyRoom',
+    'liveCaption',
+    'captionSpeaker',
+    'captionText',
+    'collisionBanner',
+    'collisionTier',
+    'collisionHeadline',
+    'collisionSummary',
+    'reviewCollision',
+    'inspector',
+    'closeInspector',
+    'conversationTab',
+    'activityTab',
+    'conversationPanel',
+    'activityPanel',
+    'dialogue',
+    'feed',
+    'emptyConversation',
+    'collisionPanel',
+    'negotiationAgents',
+    'negotiationTier',
+    'negotiationDetail',
+    'contractDiff',
+    'contractSymbol',
+    'contractBefore',
+    'contractAfter',
+    'contractConstraint',
+    'negotiationStatus',
+    'voiceMode',
+    'voiceModeLabel',
+    'voiceIconUse',
+    'volume',
+    'captionsToggle',
+    'layoutToggle',
+    'presentToggle',
+    'detailsToggle',
+    'dockShell',
+    'dockLauncher',
+    'dockClose',
+    'toasts',
+  ].map((id) => [id, document.getElementById(id)]),
+);
+
+const room = {
+  state: null,
+  tiles: new Map(),
+  seen: new Set(),
+  speechStates: new Map(),
+  speechFloor: null,
+  captions: true,
+  focusLayout: false,
+  startedAt: Date.now(),
+};
+
+const speech = new SpeechQueue({
+  onState: updateSpeechState,
+  onBoundary: ({ speaker, energy }) => setTileEnergy(room.tiles.get(speaker), energy),
+  onError: (error) => showToast(error.message, 'error'),
+});
+
+elements.volume.value = String(speech.volume);
+renderVoiceMode();
+bindControls();
+startClock();
+
+const unsubscribeFrames = window.agentigram.subscribeToFrames((frame) => {
+  if (!frame || typeof frame !== 'object') return;
+  if (frame.t === 'state') applyState(frame.state);
+  if (frame.t === 'event') applyEvent(frame);
+});
+
+const unsubscribeStatus = window.agentigram.subscribeToEvents((state) => applyState(state));
+
+window.agentigram
+  .getStatus()
+  .then((state) => applyState(state))
+  .catch((error) => showToast(error.message || 'Could not reach the local daemon', 'error'));
+
+window.addEventListener('beforeunload', () => {
+  unsubscribeFrames?.();
+  unsubscribeStatus?.();
+  speech.close();
+});
+
+function applyState(state) {
+  if (!state || typeof state !== 'object') return;
+  room.state = state;
+  if (room.speechFloor === null && Number.isFinite(state.lastSeq)) room.speechFloor = state.lastSeq;
+  speech.setLocalSession(state.sessionId);
+  speech.setVoiceAll(state.mode === 'authority');
+  renderHeader(state);
+  renderAgents();
+  renderCollision(state);
+}
+
+function applyEvent(frame) {
+  if (frame.seq != null && room.seen.has(frame.seq)) return;
+  if (frame.seq != null) room.seen.add(frame.seq);
+  // Liveness, not work. Every agent beats every ten seconds, so an unfiltered feed is mostly
+  // heartbeats and the events worth reading scroll away between them. Presence still comes
+  // from the room state, which is where the online count and the idle rows are read from.
+  if (ACTIVITY_HIDDEN.has(frame.eventType)) return;
+  const activityNode = createActivityLine(frame);
+  elements.feed.append(activityNode);
+  trimChildren(elements.feed, MAX_ACTIVITY);
+  elements.feed.parentElement.scrollTop = elements.feed.parentElement.scrollHeight;
+
+  if (frame.speech) {
+    const agent = room.state?.agents?.find((candidate) => candidate.sessionId === speakerForFrame(frame));
+    const line = createDialogueLine(frame, agent);
+    elements.dialogue.append(line);
+    trimChildren(elements.dialogue, MAX_DIALOGUE);
+    elements.emptyConversation.hidden = true;
+    elements.dialogue.parentElement.scrollTop = elements.dialogue.parentElement.scrollHeight;
+
+    if (room.speechFloor !== null && frame.seq > room.speechFloor) {
+      speech.enqueue({
+        seq: frame.seq,
+        speaker: speakerForFrame(frame),
+        text: frame.speech.text,
+        priority: frame.speech.priority,
+      });
+    }
+  }
+
+  const tile = room.tiles.get(frame.speech ? speakerForFrame(frame) : frame.sessionId);
+  if (tile) flashTile(tile);
+}
+
+function renderHeader(state) {
+  const connected = state.transport === 'connected';
+  const connectionText = connected ? 'Connected' : state.transport || 'Offline';
+  if (state.projectName) elements.projectName.textContent = `Working in ${state.projectName}`;
+  elements.link.className = `connection-pill ${connected ? 'connected' : 'offline'}`;
+  elements.link.lastElementChild.textContent = displayName(connectionText);
+
+  const summary = state.summary;
+  const agentCount = (state.agents ?? []).length;
+  const active = summary?.activeSessions ?? agentCount;
+  const collisions = summary?.openCollisions ?? (state.collisions ?? []).length;
+  const leases = summary?.activeLeases ?? (state.leases ?? []).length;
+  elements.counts.textContent = `${active} active / ${agentCount} joined / ${collisions} collision${collisions === 1 ? '' : 's'} / ${leases} lease${leases === 1 ? '' : 's'}`;
+}
+
+function renderAgents() {
+  const state = room.state;
+  if (!state) return;
+  const agents = state.agents ?? [];
+  const activeIds = new Set(agents.map((agent) => agent.sessionId));
+  const previousRects = new Map(
+    [...room.tiles.entries()].map(([id, tile]) => [id, tile.getBoundingClientRect()]),
+  );
+
+  for (const [id, tile] of room.tiles) {
+    if (activeIds.has(id) || tile.dataset.leaving === 'true') continue;
+    tile.dataset.leaving = 'true';
+    animateExit(tile, () => {
+      tile.remove();
+      room.tiles.delete(id);
+    });
+  }
+
+  for (const agent of agents) {
+    const id = agent.sessionId;
+    const speechState = room.speechStates.get(id)?.state ?? 'idle';
+    const view = deriveAgentView(state, agent, speechState, speech.isMuted(id));
+    let tile = room.tiles.get(id);
+    if (!tile) {
+      tile = createAgentTile(view, toggleAgentVoice);
+      room.tiles.set(id, tile);
+      elements.agentStage.append(tile);
+      animateEntry(tile);
+    } else {
+      tile.dataset.leaving = 'false';
+      updateAgentTile(tile, view);
+      elements.agentStage.append(tile);
+    }
+  }
+
+  elements.emptyRoom.hidden = agents.length > 0;
+  elements.agentStage.dataset.count = String(Math.min(agents.length, 4));
+  elements.agentStage.classList.toggle('focus-layout', room.focusLayout);
+  requestAnimationFrame(() => animateReflow([...room.tiles.values()], previousRects));
+}
+
+function renderCollision(state) {
+  const collision = latestCollision(state);
+  const hasCollision = Boolean(collision);
+  elements.collisionBanner.hidden = !hasCollision;
+  elements.collisionPanel.hidden = !hasCollision;
+  document.body.classList.toggle('has-collision', hasCollision);
+  if (!collision) return;
+
+  const affected = [collision.writerSession, ...(collision.affectedSessions ?? [])];
+  const people = affected.map(displayName).join(' and ');
+  const symbols = (collision.symbols ?? []).map(symbolName).join(', ');
+  const tier = `${displayName(String(collision.tier || 'collision').toLowerCase())} conflict`;
+  const negotiation = negotiationFor(state, collision.collisionId);
+  const contract = negotiation?.contract;
+
+  elements.collisionTier.textContent = tier;
+  elements.collisionHeadline.textContent = `${people} need alignment`;
+  elements.collisionSummary.textContent = symbols || collision.detail || 'Shared code is changing';
+  elements.negotiationAgents.textContent = people;
+  elements.negotiationTier.textContent = tier;
+  elements.negotiationDetail.textContent =
+    collision.detail || 'The agents are resolving overlapping work.';
+  elements.contractDiff.hidden = !contract;
+  if (contract) {
+    elements.contractSymbol.textContent = contract.symbol || symbols;
+    elements.contractBefore.textContent = contract.before || 'current contract';
+    elements.contractAfter.textContent = contract.after || 'proposed contract';
+    elements.contractConstraint.textContent = contract.constraint || contract.migration || '';
+    elements.contractConstraint.hidden = !elements.contractConstraint.textContent;
+  }
+
+  elements.negotiationStatus.textContent = negotiation?.state
+    ? `Negotiation is ${String(negotiation.state).toLowerCase()}.`
+    : 'Agents are coordinating a resolution.';
+  renderAgents();
+}
+
+function updateSpeechState(event) {
+  const { speaker, state } = event;
+  if (!speaker) return;
+  if (state === 'idle' || state === 'muted') room.speechStates.delete(speaker);
+  else room.speechStates.set(speaker, event);
+
+  for (const line of elements.dialogue.querySelectorAll('.dialogue-line.speaking')) {
+    line.classList.remove('speaking');
+  }
+  if (state === 'speaking') {
+    const line = elements.dialogue.querySelector(`[data-seq="${event.seq}"]`);
+    line?.classList.add('speaking');
+    if (room.captions) {
+      elements.captionSpeaker.textContent = displayName(speaker);
+      elements.captionText.textContent = event.text || '';
+      elements.liveCaption.hidden = false;
+    }
+  } else if (!speech.current) {
+    elements.liveCaption.hidden = true;
+  }
+  renderAgents();
+}
+
+function toggleAgentVoice(sessionId) {
+  const muted = speech.toggleMute(sessionId);
+  renderAgents();
+  showToast(`${displayName(sessionId)} voice ${muted ? 'muted' : 'enabled'}.`);
+}
+
+function bindControls() {
+  elements.voiceMode.addEventListener('click', () => {
+    const mode = speech.cycleMode();
+    renderVoiceMode();
+    showToast(
+      mode === 'off'
+        ? 'Voice is off.'
+        : mode === 'lively'
+          ? 'Lively voice mode enabled.'
+          : 'Normal voice mode enabled.',
+    );
+  });
+  elements.volume.addEventListener('input', (event) => speech.setVolume(event.target.value));
+  elements.captionsToggle.addEventListener('click', () => {
+    room.captions = !room.captions;
+    elements.captionsToggle.classList.toggle('active', room.captions);
+    elements.captionsToggle.setAttribute('aria-pressed', String(room.captions));
+    if (!room.captions) elements.liveCaption.hidden = true;
+    else if (speech.current) updateSpeechState({ ...speech.current, state: 'speaking' });
+  });
+  elements.layoutToggle.addEventListener('click', () => {
+    room.focusLayout = !room.focusLayout;
+    elements.layoutToggle.classList.toggle('active', room.focusLayout);
+    renderAgents();
+  });
+  elements.presentToggle.addEventListener('click', togglePresentation);
+  elements.dockLauncher.addEventListener('click', () => setDockOpen(true));
+  elements.dockClose.addEventListener('click', () => setDockOpen(false));
+  document.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape' && elements.dockShell.classList.contains('open')) setDockOpen(false);
+  });
+  elements.detailsToggle.addEventListener('click', () => elements.inspector.classList.add('open'));
+  elements.closeInspector.addEventListener('click', () =>
+    elements.inspector.classList.remove('open'),
+  );
+  elements.reviewCollision.addEventListener('click', () => {
+    elements.inspector.classList.add('open');
+    elements.collisionPanel.scrollIntoView({ behavior: 'smooth', block: 'end' });
+  });
+  elements.conversationTab.addEventListener('click', () => selectInspectorTab('conversation'));
+  elements.activityTab.addEventListener('click', () => selectInspectorTab('activity'));
+}
+
+function selectInspectorTab(tab) {
+  const activity = tab === 'activity';
+  elements.conversationTab.setAttribute('aria-selected', String(!activity));
+  elements.activityTab.setAttribute('aria-selected', String(activity));
+  elements.conversationPanel.hidden = activity;
+  elements.activityPanel.hidden = !activity;
+  elements.conversationTab.parentElement.classList.toggle('activity-selected', activity);
+}
+
+/**
+ * Open or collapse the control dock.
+ *
+ * Collapsed, the controls are `visibility: hidden` and so are out of the tab order entirely;
+ * focus therefore has to be handed over explicitly, or closing the dock would strand the caret
+ * on an element nobody can see.
+ */
+function setDockOpen(open) {
+  elements.dockShell.classList.toggle('open', open);
+  elements.dockLauncher.setAttribute('aria-expanded', String(open));
+  if (open) elements.voiceMode.focus();
+  else elements.dockLauncher.focus();
+}
+
+async function togglePresentation() {
+  const next = !document.body.classList.contains('presenting');
+  document.body.classList.toggle('presenting', next);
+  elements.presentToggle.classList.toggle('active', next);
+  try {
+    if (next && !document.fullscreenElement) await document.documentElement.requestFullscreen();
+    if (!next && document.fullscreenElement) await document.exitFullscreen();
+  } catch {
+    showToast('Presentation layout enabled. Full screen was unavailable.');
+  }
+}
+
+document.addEventListener('fullscreenchange', () => {
+  if (!document.fullscreenElement) {
+    document.body.classList.remove('presenting');
+    elements.presentToggle.classList.remove('active');
+  }
+});
+
+function renderVoiceMode() {
+  const mode = speech.mode;
+  elements.voiceMode.classList.toggle('voice-off', mode === 'off');
+  elements.voiceMode.classList.toggle('active', mode !== 'off');
+  elements.voiceIconUse.setAttribute('href', mode === 'off' ? '#icon-volume-off' : '#icon-volume');
+  elements.voiceModeLabel.textContent =
+    mode === 'off' ? 'Voice off' : mode === 'lively' ? 'Lively' : 'Voice on';
+}
+
+function showToast(message, kind = 'normal') {
+  const toast = document.createElement('div');
+  toast.className = `toast ${kind}`;
+  toast.textContent = message;
+  elements.toasts.append(toast);
+  window.setTimeout(() => {
+    toast.classList.add('leaving');
+    window.setTimeout(() => toast.remove(), 220);
+  }, 3200);
+}
+
+function startClock() {
+  const update = () => {
+    const elapsed = Math.max(0, Date.now() - room.startedAt);
+    const minutes = Math.floor(elapsed / 60_000);
+    const seconds = Math.floor((elapsed % 60_000) / 1000);
+    elements.meetingClock.textContent = `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
+  };
+  update();
+  window.setInterval(update, 1000);
+}
+
+function trimChildren(parent, maximum) {
+  while (parent.childElementCount > maximum) parent.firstElementChild?.remove();
+}

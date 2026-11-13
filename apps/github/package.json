@@ -1,0 +1,17 @@
+{
+  "name": "@agentigram/github",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc --noEmit",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@octokit/app": "16.1.4",
+    "@octokit/webhooks": "14.2.0",
+    "@agentigram/protocol": "workspace:*",
+    "@agentigram/contracts": "workspace:*"
+  }
+}

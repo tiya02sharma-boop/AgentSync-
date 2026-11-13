@@ -1,0 +1,35 @@
+{
+  "name": "agentigram",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "bin": {
+    "agg": "bin/agg.mjs"
+  },
+  "packageManager": "pnpm@10.34.5",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "setup": "node scripts/setup.mjs",
+    "bootstrap": "pnpm install && npm --prefix apps/tui ci",
+    "dev": "pnpm --parallel --filter @agentigram/simulator --filter @agentigram/web dev",
+    "live": "pnpm --parallel --filter @agentigram/simulator live --filter @agentigram/web dev",
+    "live:setup": "pnpm --filter @agentigram/simulator live:setup",
+    "check": "pnpm lint && pnpm typecheck && pnpm test && npm --prefix apps/tui test",
+    "build": "pnpm -r build",
+    "test": "pnpm -r test",
+    "typecheck": "pnpm -r typecheck",
+    "lint": "biome lint .",
+    "model:warm": "npm --prefix apps/tui run warm",
+    "sim": "pnpm --filter @agentigram/simulator start",
+    "agentigram": "pnpm --filter @agentigram/daemon agentigram"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "2.5.14",
+    "@types/node": "^22.20.4",
+    "tsx": "^4.23.13",
+    "typescript": "~5.9.3",
+    "vitest": "^4.1.11"
+  }
+}
