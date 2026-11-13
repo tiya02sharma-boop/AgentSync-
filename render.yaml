@@ -4,7 +4,7 @@ services:
     runtime: node
     plan: free
     buildCommand: corepack enable && pnpm install --frozen-lockfile && pnpm --filter @agentigram/web build
-    startCommand: pnpm --filter @agentigram/web start -- --hostname 0.0.0.0
+    startCommand: pnpm --filter @agentigram/web start --hostname 0.0.0.0
     healthCheckPath: /team/hackathon
     envVars:
       - key: NODE_VERSION
