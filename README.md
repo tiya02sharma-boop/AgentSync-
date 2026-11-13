@@ -67,8 +67,13 @@ the coordinator limits dashboard submissions to human actions, but the coordinat
 demo-level shared-token scheme, not production user authentication.
 
 To show events from the local AgentSync daemon in that hosted dashboard, deploy the coordinator
-with a separate `BRIDGE_SECRET` (`pnpm --filter @agentigram/coordinator exec wrangler secret put
-BRIDGE_SECRET`). Set `AGENTSYNC_BRIDGE_URL` to the Worker HTTPS URL and
+with a separate `BRIDGE_SECRET`:
+
+```bash
+pnpm --filter @agentigram/coordinator exec wrangler secret put BRIDGE_SECRET
+```
+
+Set `AGENTSYNC_BRIDGE_URL` to the Worker HTTPS URL and
 `AGENTSYNC_BRIDGE_SECRET` to the same secret in the authority daemon's environment. Restart that
 daemon after setting them. It will replay unsent room events and forward new events to the hosted
 room. Open `/team/<room-id>` on the dashboard; for the default local `agentsync-live` room, use

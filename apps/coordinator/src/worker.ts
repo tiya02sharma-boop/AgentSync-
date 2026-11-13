@@ -4,7 +4,7 @@ export { RoomDO };
 
 const ROOM_PATH = /^\/room\/([A-Za-z0-9_-]{1,64})(\/ingest|\/bridge)?$/;
 
-/** Routes `/room/:roomId[/ingest]` to that room's Durable Object; everything else is 404. */
+/** Routes room WebSockets and trusted ingest/bridge requests to that room's Durable Object. */
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const { pathname } = new URL(request.url);
