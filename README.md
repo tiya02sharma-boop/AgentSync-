@@ -57,8 +57,9 @@ two web services:
 
 Configure Nonilion to send webhook events to
 `https://<agentsync-api-host>/webhook` (or `/webhook/nonilion`). In the Render `agentsync-api`
-service, add `NONILION_SENDER_KEY` with the sender key as its value. The sender must send that key
-as `Authorization: Bearer <sender-key>`. Save the environment variable and redeploy the API.
+service, set `WEBHOOK_SECRET` to the webhook secret. The receiver accepts it in the `Authorization:
+Bearer ...`, `X-Webhook-Secret`, or `X-Sender-Key` header. `NONILION_SENDER_KEY` remains supported as
+a legacy environment-variable name. Save the environment variable and redeploy the API.
 
 The API stores tasks, locks, events, and contracts in process memory. This is suitable for a demo;
 state is lost on restart and is not shared between instances. Add persistent storage and webhook

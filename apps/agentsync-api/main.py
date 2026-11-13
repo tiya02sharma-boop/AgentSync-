@@ -106,18 +106,22 @@ def get_project(project_id: str) -> dict[str, Any]:
 async def nonilion_webhook(
     request: Request,
     authorization: str | None = Header(default=None),
+    webhook_secret: str | None = Header(default=None, alias="X-Webhook-Secret"),
+    sender_key: str | None = Header(default=None, alias="X-Sender-Key"),
 ) -> dict[str, Any]:
     """Accept Nonilion JSON events, optionally authenticating its sender key.
 
     Recognized AgentSync event fields retain deterministic conflict detection. Other JSON
     objects are accepted and recorded by their field names for webhook compatibility.
     """
-    expected_key = os.getenv("NONILION_SENDER_KEY")
-    if expected_key:
-        received_key = authorization or ""
-        if received_key[:7].lower() == "bearer ":
-            received_key = received_key[7:]
-        if not hmac.compare_digest(received_key, expected_key):
+    expected_secret = os.getenv("WEBHOOK_SECRET") or os.getenv("NONILION_SENDER_KEY")
+    if expected_secret:
+        received_values = [webhook_secret or "", sender_key or ""]
+        auth_value = authorization or ""
+        if auth_value[:7].lower() == "bearer ":
+            auth_value = auth_value[7:]
+        received_values.append(auth_value)
+        if not any(hmac.compare_digest(value, expected_secret) for value in received_values):
             raise HTTPException(status_code=401, detail="Invalid sender key")
 
     try:
