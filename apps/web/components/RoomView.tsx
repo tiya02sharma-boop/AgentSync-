@@ -3,7 +3,7 @@
 import type { PayloadType } from '@agentigram/protocol';
 import Link from 'next/link';
 import { useMemo, useState } from 'react';
-import { activeCollision, agents, demoEvents, describeEvent } from '../lib/demo-data';
+import { describeEvent } from '../lib/demo-data';
 import { useRoomStream } from '../lib/use-room-stream';
 
 const filters: Array<{ label: string; types?: PayloadType[] }> = [
@@ -15,27 +15,25 @@ const filters: Array<{ label: string; types?: PayloadType[] }> = [
 
 export function RoomView({ teamId }: { teamId: string }) {
   const stream = useRoomStream(teamId);
-  const events = stream.events.length > 0 ? stream.events : demoEvents;
-  const seeded = stream.events.length === 0;
-  const displayedAgents = seeded
-    ? agents
-    : Object.values(stream.roomState.sessions)
-        .filter((session) => session.status !== 'ended')
-        .map((session) => ({
-          id: session.sessionId,
-          engineer: session.engineerId,
-          role: session.role ?? session.sessionId,
-          model: session.model,
-          host: session.host,
-          branch: session.branch,
-          task: session.task ?? session.intent?.task ?? 'Awaiting task intent',
-          status: session.status,
-          lease: Object.values(stream.roomState.leases)
-            .find((lease) => lease.sessionId === session.sessionId)
-            ?.symbols[0]?.split('#')
-            .at(-1)
-            ?.split(':')[0],
-        }));
+  const events = stream.events;
+  const displayedAgents = Object.values(stream.roomState.sessions)
+    .filter((session) => session.status !== 'ended')
+    .map((session) => ({
+      id: session.sessionId,
+      engineer: session.engineerId,
+      role: session.role ?? session.sessionId,
+      model: session.model,
+      host: session.host,
+      branch: session.branch,
+      task: session.task ?? session.intent?.task ?? 'Awaiting task intent',
+      status: session.status,
+      lease: Object.values(stream.roomState.leases)
+        .find((lease) => lease.sessionId === session.sessionId)
+        ?.symbols[0]?.split('#')
+        .at(-1)
+        ?.split(':')[0],
+    }));
+  const latestCollision = [...events].reverse().find((event) => event.payload.type === 'COLLISION');
   const [filter, setFilter] = useState('All');
   const shownEvents = useMemo(() => {
     const selected = filters.find((item) => item.label === filter);
@@ -55,33 +53,44 @@ export function RoomView({ teamId }: { teamId: string }) {
         </div>
         <div className="connection-state">
           <i className={stream.status === 'live' ? 'live' : ''}></i>
-          <span>{seeded ? 'Rehearsal data' : stream.status}</span>
-          {seeded && <b>Seeded</b>}
+          <span>{stream.status === 'live' ? 'Live coordinator' : stream.status}</span>
         </div>
       </header>
 
       <section className="signal-board" aria-labelledby="collision-title">
         <div className="signal-copy">
           <div className="signal-kicker">
-            <span>Semantic collision</span>
-            <strong>{Math.round(activeCollision.confidence * 100)}% confidence</strong>
+            <span>{latestCollision ? 'Detected collision' : 'Collision monitor'}</span>
+            {latestCollision?.payload.type === 'COLLISION' && latestCollision.payload.confidence !== undefined && (
+              <strong>{Math.round(latestCollision.payload.confidence * 100)}% confidence</strong>
+            )}
           </div>
-          <h2 id="collision-title">Authentication changed an interface Profile already depends on.</h2>
-          <p>{activeCollision.detail}</p>
-          <code>{activeCollision.symbol}</code>
+          <h2 id="collision-title">
+            {latestCollision?.payload.type === 'COLLISION'
+              ? `${latestCollision.payload.tier.replaceAll('_', ' ')} collision detected`
+              : 'No collision reported by the live room.'}
+          </h2>
+          {latestCollision?.payload.type === 'COLLISION' ? (
+            <>
+              <p>{latestCollision.payload.detail}</p>
+              {latestCollision.payload.symbols.map((symbol) => <code key={symbol}>{symbol}</code>)}
+            </>
+          ) : (
+            <p>Collision information will appear here when the coordinator reports an event.</p>
+          )}
         </div>
         <div
           className="signal-path"
           role="img"
-          aria-label="Collision flow from Backend to Payments"
+          aria-label="Collision status from the live room"
         >
-          <span className="role-avatar backend">B</span>
-          <div>
-            <i></i>
-            <b>contract proposed</b>
-            <i></i>
-          </div>
-          <span className="role-avatar payments">P</span>
+          {latestCollision?.payload.type === 'COLLISION' ? (
+            <>
+              <span className="role-avatar backend">{latestCollision.payload.writerSession[0]}</span>
+              <div><i></i><b>{latestCollision.payload.affectedSessions.length} affected agents</b><i></i></div>
+              <span className="role-avatar payments">{latestCollision.payload.affectedSessions[0]?.[0] ?? '?'}</span>
+            </>
+          ) : <span>Waiting for live collision events</span>}
         </div>
         <Link className="text-action" href={`/team/${teamId}/collisions`}>
           Review collision
@@ -110,6 +119,7 @@ export function RoomView({ teamId }: { teamId: string }) {
                 {agent.lease && <code className="lease">{agent.lease}</code>}
               </article>
             ))}
+            {displayedAgents.length === 0 && <p>No agents have connected to this room yet.</p>}
           </div>
         </section>
 
@@ -150,6 +160,7 @@ export function RoomView({ teamId }: { teamId: string }) {
                 </p>
               </li>
             ))}
+            {shownEvents.length === 0 && <li><p>No live events received yet.</p></li>}
           </ol>
         </section>
       </div>
