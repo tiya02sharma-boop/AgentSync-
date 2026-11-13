@@ -6,13 +6,15 @@ Run locally with:
 
 from __future__ import annotations
 
+import hmac
+import os
 from datetime import UTC, datetime
 from enum import StrEnum
 from typing import Any
 from uuid import uuid4
 
-from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel, Field
+from fastapi import FastAPI, Header, HTTPException, Request
+from pydantic import BaseModel, Field, ValidationError
 
 
 app = FastAPI(title="AgentSync API", version="0.1.0")
@@ -99,14 +101,42 @@ def get_project(project_id: str) -> dict[str, Any]:
     return project_state(project_id)
 
 
-@app.post("/webhook/nonilion", status_code=202)
-def nonilion_webhook(event: WebhookEvent) -> dict[str, Any]:
-    """Accept a Nonilion Bot API event and deterministically detect API conflicts.
+@app.post("/webhook", status_code=200)
+@app.post("/webhook/nonilion", status_code=200)
+async def nonilion_webhook(
+    request: Request,
+    authorization: str | None = Header(default=None),
+) -> dict[str, Any]:
+    """Accept Nonilion JSON events, optionally authenticating its sender key.
 
-    LLMs can later explain or propose a resolution, but conflict detection here depends
-    only on declared symbols and incompatible before/after interface values.
+    Recognized AgentSync event fields retain deterministic conflict detection. Other JSON
+    objects are accepted and recorded by their field names for webhook compatibility.
     """
-    state = project_state(event.project_id)
+    expected_key = os.getenv("NONILION_SENDER_KEY")
+    if expected_key:
+        received_key = authorization or ""
+        if received_key[:7].lower() == "bearer ":
+            received_key = received_key[7:]
+        if not hmac.compare_digest(received_key, expected_key):
+            raise HTTPException(status_code=401, detail="Invalid sender key")
+
+    try:
+        payload = await request.json()
+    except Exception as error:
+        raise HTTPException(status_code=400, detail="Invalid JSON payload") from error
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=400, detail="JSON payload must be an object")
+
+    project_id = payload.get("project_id")
+    if not isinstance(project_id, str) or not project_id:
+        project_id = "hackathon"
+    state = project_state(project_id)
+    try:
+        event = WebhookEvent.model_validate(payload)
+    except ValidationError:
+        record(state, "nonilion_event", payload_keys=sorted(payload.keys()))
+        return {"accepted": True, "conflict": None}
+
     record(state, "nonilion_event", **event.model_dump(exclude_none=True))
     if event.kind != "api_change" or not all([event.symbol, event.before, event.after]):
         return {"accepted": True, "conflict": None}

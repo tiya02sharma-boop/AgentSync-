@@ -11,3 +11,9 @@ uvicorn main:app --reload --port 8000
 ```
 
 The interactive API is available at `http://localhost:8000/docs`.
+
+The webhook accepts JSON objects at both `/webhook` and `/webhook/nonilion`. To require sender
+authentication, set `NONILION_SENDER_KEY`; requests must include
+`Authorization: Bearer <sender-key>`. If the variable is unset, requests are accepted without
+sender-key validation. On Render, set this secret in the `agentsync-api` service's Environment
+settings and redeploy. Do not commit the sender key to the repository.
