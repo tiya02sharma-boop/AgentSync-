@@ -3,3 +3,5 @@
 ROOM_SECRET=dev-room-secret
 # Bearer token for POST /room/:roomId/ingest (specmerge, github workers).
 WORKER_SECRET=dev-worker-secret
+# Bearer token for the trusted local-authority relay at /room/:roomId/bridge.
+BRIDGE_SECRET=dev-bridge-secret

@@ -32,6 +32,7 @@ import {
 import { reduce, routeEvent, sessionPresence } from '@agentigram/reducer';
 import pino from 'pino';
 import { AuthorityTransport } from './authority-transport.js';
+import { CoordinatorBridge } from './coordinator-bridge.js';
 import { autonomousDenial } from './autonomous-guard.js';
 import { CursorStore } from './cursor-store.js';
 import { isFreshEvent, shouldRouteToInbox, shouldWake, WakeInbox } from './inbox.js';
@@ -94,6 +95,7 @@ export class LaptopDaemon {
   private readonly adapter: AgentAdapter;
   private readonly transport: RoomTransport;
   private readonly cursor;
+  private readonly coordinatorBridge?: CoordinatorBridge;
   private roomState: RoomState;
   private readonly server;
   private heartbeat: NodeJS.Timeout | undefined;
@@ -126,6 +128,19 @@ export class LaptopDaemon {
             sessionId: state.sessionId,
             lastSeq: this.cursor.get(),
           });
+    const bridgeUrl = process.env.AGENTSYNC_BRIDGE_URL?.trim();
+    const bridgeSecret = process.env.AGENTSYNC_BRIDGE_SECRET;
+    if (state.mode === 'authority' && bridgeUrl && bridgeSecret) {
+      this.coordinatorBridge = new CoordinatorBridge({
+        url: bridgeUrl,
+        roomId: state.roomId,
+        secret: bridgeSecret,
+        cursor: CursorStore.forRoom(`${state.roomId}-hosted-bridge`),
+        log: this.log,
+      });
+    } else if (state.mode === 'authority' && (bridgeUrl || bridgeSecret)) {
+      this.log.warn({}, 'hosted coordinator bridge needs both URL and secret; relay disabled');
+    }
     this.transport.onWelcome((roomState) => {
       this.roomState = roomState;
       this.cursor.set(roomState.lastSeq);
@@ -135,7 +150,10 @@ export class LaptopDaemon {
       // rejoin, even while the previous heartbeat still looks fresh.
       this.sessionAnnouncement = this.announceSession();
     });
-    this.transport.onEvents((events) => this.receive(events));
+    this.transport.onEvents((events) => {
+      this.receive(events);
+      this.coordinatorBridge?.enqueue(events);
+    });
     this.transport.onStatus((status) => {
       this.log.info({ status }, 'transport status');
       this.broadcast({ t: 'state', state: this.statusOutput() });
@@ -148,6 +166,11 @@ export class LaptopDaemon {
   }
 
   async start(): Promise<void> {
+    if (this.coordinatorBridge && this.transport instanceof AuthorityTransport) {
+      this.coordinatorBridge.enqueue(
+        this.transport.eventsAfter(this.coordinatorBridge.lastLocalSeq),
+      );
+    }
     await this.transport.start();
     // The report covers this run only; earlier runs of the same room keep their own.
     if (this.transport instanceof AuthorityTransport) {
@@ -222,6 +245,7 @@ export class LaptopDaemon {
   }
 
   private async stopOnce(): Promise<void> {
+    this.coordinatorBridge?.stop();
     clearInterval(this.heartbeat);
     clearInterval(this.idleTick);
     this.planner?.stop();

@@ -2,7 +2,7 @@ import { type Env, RoomDO } from './room-do.js';
 
 export { RoomDO };
 
-const ROOM_PATH = /^\/room\/([A-Za-z0-9_-]{1,64})(\/ingest)?$/;
+const ROOM_PATH = /^\/room\/([A-Za-z0-9_-]{1,64})(\/ingest|\/bridge)?$/;
 
 /** Routes `/room/:roomId[/ingest]` to that room's Durable Object; everything else is 404. */
 export default {

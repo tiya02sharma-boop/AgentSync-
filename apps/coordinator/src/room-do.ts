@@ -3,6 +3,7 @@ import {
   type ClientKind,
   ClientMessageSchema,
   type Event,
+  NewEventSchema,
   type ServerMessage,
 } from '@agentigram/protocol';
 import { checkToken, safeEqual } from './authz.js';
@@ -16,13 +17,15 @@ export type Env = {
   ROOM_SECRET?: string;
   /** Bearer token for HTTP ingest. Separate from ROOM_SECRET so a leaked daemon token cannot post results. */
   WORKER_SECRET?: string;
+  /** Bearer token for the trusted local-authority event relay. */
+  BRIDGE_SECRET?: string;
 };
 
 /** Per-socket state that survives hibernation (limit 16 KiB). */
 type Attachment = { roomId: string; hello: boolean; kind?: ClientKind; sessionId?: string };
 
 const MAX_FRAME = 128 * 1024;
-const ROOM_PATH = /^\/room\/([A-Za-z0-9_-]{1,64})(\/ingest)?$/;
+const ROOM_PATH = /^\/room\/([A-Za-z0-9_-]{1,64})(\/ingest|\/bridge)?$/;
 
 /** One Durable Object per room: a WebSocket Hibernation adapter over `RoomCore`. */
 export class RoomDO extends DurableObject<Env> {
@@ -38,7 +41,8 @@ export class RoomDO extends DurableObject<Env> {
     if (!match?.[1]) return new Response('not found', { status: 404 });
     const roomId = match[1];
 
-    if (match[2]) return this.ingest(request, roomId);
+    if (match[2] === '/ingest') return this.ingest(request, roomId);
+    if (match[2] === '/bridge') return this.bridge(request, roomId);
 
     if (request.headers.get('Upgrade')?.toLowerCase() !== 'websocket') {
       return new Response('expected a WebSocket upgrade', { status: 426 });
@@ -72,6 +76,57 @@ export class RoomDO extends DurableObject<Env> {
       await this.scheduleNextAlarm(roomId);
     }
     return json({ id: out.event.id, seq: out.event.seq, duplicate: out.duplicate }, 200);
+  }
+
+  /**
+   * Accept a complete event from the trusted local room authority. This is
+   * intentionally separate from the limited worker ingest API: the local
+   * authority has already authenticated agents and generated coordinator-only
+   * events such as collisions and lease decisions.
+   */
+  private async bridge(request: Request, roomId: string): Promise<Response> {
+    if (request.method !== 'POST') return json({ error: 'method not allowed' }, 405);
+    const bearer = /^Bearer (.+)$/.exec(request.headers.get('Authorization') ?? '')?.[1] ?? '';
+    const secret = this.env.BRIDGE_SECRET;
+    if (!secret || !safeEqual(bearer, secret)) return json({ error: 'unauthorized' }, 401);
+
+    const body = await request.text();
+    if (body.length > MAX_EVENT_BYTES) return json({ error: 'payload too large' }, 413);
+    let input: unknown;
+    try {
+      input = JSON.parse(body);
+    } catch {
+      return json({ error: 'not JSON' }, 400);
+    }
+    const inputs = Array.isArray(input) ? input : [input];
+    if (inputs.length === 0 || inputs.length > 100) {
+      return json({ error: 'bridge batches must contain 1–100 events' }, 400);
+    }
+    const parsed = inputs.map((item) => NewEventSchema.safeParse(item));
+    const invalid = parsed.find((item) => !item.success);
+    if (invalid && !invalid.success) return json({ error: 'invalid event' }, 400);
+    const events = parsed.map((item) => (item.success ? item.data : undefined));
+    if (events.some((event) => event?.roomId !== roomId)) {
+      return json({ error: 'room mismatch' }, 400);
+    }
+
+    // The dedicated bridge secret is the authority boundary. RoomCore assigns
+    // cloud sequence/timestamp values while retaining local event identities.
+    const core = this.coreFor(roomId);
+    const results: { id: string; seq: number; duplicate: boolean }[] = [];
+    let changed = false;
+    for (const event of events) {
+      if (!event) continue;
+      const out = core.submit(event, { kind: 'system' });
+      if (!out.ok) return json({ error: out.message }, 400);
+      results.push({ id: out.event.id, seq: out.event.seq, duplicate: out.duplicate });
+      if (!out.duplicate) {
+        changed = true;
+        for (const appended of out.events) this.broadcast(appended);
+      }
+    }
+    if (changed) await this.scheduleNextAlarm(roomId);
+    return json({ events: results }, 200);
   }
 
   override async webSocketMessage(ws: WebSocket, message: string | ArrayBuffer): Promise<void> {
