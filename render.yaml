@@ -11,6 +11,12 @@ services:
         value: 22.20.0
       - key: NODE_ENV
         value: production
+      # Set these in the Render dashboard after deploying apps/coordinator.
+      # NEXT_PUBLIC_* values are embedded into the Next.js build, so changing them triggers a rebuild.
+      - key: NEXT_PUBLIC_COORDINATOR_URL
+        sync: false
+      - key: NEXT_PUBLIC_ROOM_TOKEN
+        sync: false
 
   - type: web
     name: agentsync-api

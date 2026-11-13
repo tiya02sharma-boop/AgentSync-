@@ -33,7 +33,7 @@ export function useRoomStream(teamId: string): StreamState {
             roomId: teamId,
             lastSeq: lastSeq.current,
             client: 'dashboard',
-            token: 'dev',
+            token: process.env.NEXT_PUBLIC_ROOM_TOKEN ?? 'dev',
           }),
         );
       };

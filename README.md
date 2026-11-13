@@ -4,9 +4,9 @@ AgentSync is a coordination layer for teams using multiple coding agents. It mak
 and shared code resources visible, flags incompatible interface changes, and gives people a chance
 to approve a proposed contract before it is marked verified.
 
-This repository contains a FastAPI coordination API, a Next.js activity dashboard, and the
-Agentigram agent-coordination runtime and simulator. The API is an MVP; the dashboard currently
-shows its own simulator-backed room and is not yet wired to the FastAPI API.
+This repository contains a FastAPI webhook/task API, a Next.js activity dashboard, and the
+Agentigram WebSocket coordinator and agent runtime. The dashboard connects to the WebSocket
+coordinator; the FastAPI API is a separate MVP used for webhooks and task/contract endpoints.
 
 ## What it does
 
@@ -48,12 +48,32 @@ two-agent local demo, follow [LIVE_DEMO.md](LIVE_DEMO.md).
 
 ## Deploy to Render
 
-The repository includes a [Render Blueprint](render.yaml) for the dashboard and API. Push the
-repository to GitHub, create a Blueprint in Render, and select this repository. Render will create
-two web services:
+The repository includes a [Render Blueprint](render.yaml) for the dashboard and FastAPI API. The
+dashboard's live room stream also requires the WebSocket coordinator in `apps/coordinator`, which
+uses Cloudflare Durable Objects and must be deployed separately:
+
+```bash
+corepack enable
+pnpm install
+pnpm --filter @agentigram/coordinator deploy
+```
+
+After deployment, copy the Cloudflare Worker URL. In the Render `agentigram-dashboard` service, set
+`NEXT_PUBLIC_COORDINATOR_URL` to its secure WebSocket URL (change `https://` to `wss://`), such as
+`wss://agentigram-coordinator.<your-subdomain>.workers.dev`, and set `NEXT_PUBLIC_ROOM_TOKEN` to the
+same value configured as the coordinator's `ROOM_SECRET`. These `NEXT_PUBLIC_*` values are embedded
+at build time, so save them and trigger a new deploy. The room token is visible to dashboard users;
+the coordinator limits dashboard submissions to human actions, but the coordinator's M1 auth is a
+demo-level shared-token scheme, not production user authentication.
+
+The Render Blueprint creates two web services:
 
 - **Dashboard:** Next.js, available at `/team/hackathon` on its Render URL.
 - **API:** FastAPI, with `/health` and interactive docs at `/docs`.
+
+Without the separately deployed coordinator and these two Render variables, the dashboard falls
+back to its labeled rehearsal data; deploying the FastAPI API alone does not provide the live room
+WebSocket.
 
 Configure Nonilion to send webhook events to
 `https://<agentsync-api-host>/webhook` (or `/webhook/nonilion`). In the Render `agentsync-api`
