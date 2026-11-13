@@ -12,6 +12,10 @@ uvicorn main:app --reload --port 8000
 
 The interactive API is available at `http://localhost:8000/docs`.
 
+`nonilion-ready-main.py` is an alternate implementation copied in for review. Render continues to
+run `main.py`; the alternate file is not active. Its Nonilion reply API assumptions need confirmation
+before switching the service to it.
+
 The webhook accepts JSON objects at both `/webhook` and `/webhook/nonilion`. To require sender
 authentication, set `WEBHOOK_SECRET` (or the legacy `NONILION_SENDER_KEY`). Send the secret in
 `Authorization: Bearer <secret>`, `X-Webhook-Secret: <secret>`, or `X-Sender-Key: <secret>`. If
