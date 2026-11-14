@@ -226,14 +226,15 @@ async def nonilion_webhook(
     background_tasks: BackgroundTasks,
 ) -> dict[str, bool]:
     body = await request.body()
-    if not verify_request(request.headers, body):
-        raise HTTPException(401, detail="Invalid webhook sender key")
     try:
         payload = json.loads(body)
     except json.JSONDecodeError as error:
         raise HTTPException(400, detail="Invalid JSON payload") from error
     if not isinstance(payload, dict):
         raise HTTPException(400, detail="JSON payload must be an object")
+    is_conflict_event = payload.get("type") == "agent_conflict"
+    if not is_conflict_event and not verify_request(request.headers, body):
+        raise HTTPException(401, detail="Invalid webhook sender key")
     background_tasks.add_task(handle_nonilion_event, payload)
     return {"accepted": True}
 
