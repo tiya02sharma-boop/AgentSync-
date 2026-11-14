@@ -86,14 +86,36 @@ def verify_request(headers: Any, body: bytes) -> bool:
     return hmac.compare_digest(received, expected)
 
 
-_last_nonilion_target: dict[str, Any] = {}
+_target_file = "/tmp/nonilion_target.json"
+
+
+def _load_target() -> dict[str, Any]:
+    try:
+        if os.path.exists(_target_file):
+            with open(_target_file, "r", encoding="utf-8") as f:
+                return json.load(f)
+    except Exception:
+        pass
+    return {}
+
+
+def _save_target(target: dict[str, Any]) -> None:
+    try:
+        with open(_target_file, "w", encoding="utf-8") as f:
+            json.dump(target, f)
+    except Exception:
+        pass
+
+
+_last_nonilion_target: dict[str, Any] = _load_target()
 
 
 def prepare_reply_target(payload: dict[str, Any]) -> None:
     """Store this webhook event's reply target for send_reply()."""
-    if payload.get("api_base"):
+    if payload.get("api_base") or payload.get("channel_id") or payload.get("room_id"):
         _last_nonilion_target.clear()
         _last_nonilion_target.update(payload)
+        _save_target(_last_nonilion_target)
     _reply_context.set(payload)
 
 
