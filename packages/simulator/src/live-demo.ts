@@ -53,7 +53,8 @@ export function setupLiveDemo(force = false): void {
 }
 
 function hasUuid(path: string): boolean {
-  return /UUID|string/.test(readFileSync(path, 'utf8'));
+  const content = readFileSync(path, 'utf8');
+  return /user_id\s*:\s*(?:string|UUID)/i.test(content);
 }
 
 if (process.argv.includes('--setup') || process.argv.includes('--reset')) {
