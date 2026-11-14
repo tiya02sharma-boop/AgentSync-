@@ -112,10 +112,12 @@ _last_nonilion_target: dict[str, Any] = _load_target()
 
 def prepare_reply_target(payload: dict[str, Any]) -> None:
     """Store this webhook event's reply target for send_reply()."""
-    if payload.get("api_base") or payload.get("channel_id") or payload.get("room_id"):
+    print(f"[AgentSync Inbound Webhook] {json.dumps(payload)}")
+    if payload.get("type") != "agent_conflict":
         _last_nonilion_target.clear()
         _last_nonilion_target.update(payload)
         _save_target(_last_nonilion_target)
+        print(f"[AgentSync Saved Nonilion Target] {json.dumps(_last_nonilion_target)}")
     _reply_context.set(payload)
 
 
@@ -126,38 +128,50 @@ async def send_reply(text: str, files: list[str] | None = None) -> None:
     """
     del files
     event = _reply_context.get() or {}
+    target = _last_nonilion_target or _load_target()
     token = os.getenv("NONILION_BOT_TOKEN")
-    api_base = event.get("api_base") or _last_nonilion_target.get("api_base")
-    event_type = event.get("type") or _last_nonilion_target.get("type")
+    api_base = (
+        (event.get("api_base") if event.get("type") != "agent_conflict" else None)
+        or target.get("api_base")
+        or os.getenv("NONILION_API_BASE", "https://api.nonilion.com")
+    )
+    event_type = target.get("type") or event.get("type")
+
+    print(f"[AgentSync send_reply] token={bool(token)} api_base={api_base} event_type={event_type}")
     if not token or not isinstance(api_base, str) or not api_base:
-        print(f"Nonilion reply skipped: token={bool(token)} api_base={api_base}")
+        print("[AgentSync send_reply] Skipped: missing token or api_base")
         return
 
     private = event_type == "console_message"
     endpoint = "inbox" if private else "chat"
     body: dict[str, Any] = {"text": text}
-    message_id = event.get("message_id") or _last_nonilion_target.get("message_id")
+    message_id = event.get("message_id") or target.get("message_id")
     if private and message_id:
         body["reply_to"] = message_id
-    for key in ("channel_id", "room_id", "conversation_id", "session_id"):
-        val = event.get(key) or _last_nonilion_target.get(key)
+    for key in ("channel_id", "room_id", "conversation_id", "session_id", "chat_id", "space_id"):
+        val = event.get(key) or target.get(key)
         if val:
             body[key] = val
 
+    url = f"{api_base.rstrip('/')}/{endpoint}"
+    print(f"[AgentSync Outbound POST] {url} data={json.dumps(body)}")
+
     def post() -> None:
         request = UrlRequest(
-            f"{api_base.rstrip('/')}/{endpoint}",
+            url,
             data=json.dumps(body).encode("utf-8"),
             headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
             method="POST",
         )
         with urlopen(request, timeout=4) as response:
-            response.read()
+            status = getattr(response, "status", 200)
+            resp = response.read().decode("utf-8")
+            print(f"[AgentSync Outbound OK] Status: {status} Body: {resp}")
 
     try:
         await asyncio.to_thread(post)
-    except (HTTPError, URLError, TimeoutError) as error:
-        print(f"Nonilion reply failed: {error}")
+    except Exception as error:
+        print(f"[AgentSync Outbound Failed] {error}")
 
 
 # --------------------------- AgentSync demo logic ----------------------------
@@ -194,11 +208,15 @@ def coordinator_reply(text: str, sender: str) -> str:
 
     state["proposal"] = True
     return (
-        "## Semantic Collision Detected\n"
-        "- **Auth Agent** changed `User.user_id` to UUID (`string`).\n"
-        "- **Profile Agent** still expects `number`.\n"
-        "- **Proposal**: Migrate dependent Profile callers to UUID v4.\n\n"
-        "Reply **approve** to apply and verify this contract, or **reject** to stop it."
+        "## ⚠️ Semantic Collision Detected (96% Confidence)\n\n"
+        "**Evidence:**\n"
+        "- **Contract Symbol**: `src/user.ts#User.user_id:property`\n"
+        "- **Auth Agent Change**: `user_id` modified from `number` → `string (UUID)`\n"
+        "- **Profile Agent Dependency**: `src/profile.ts` requires `user_id: number`\n"
+        "- **Speculative Merge Check**: Type collision detected in integration seam\n\n"
+        "**Proposal:**\n"
+        "Migrate `Profile Agent` (`src/profile.ts`) callers to UUID v4 to preserve TypeScript contract integrity.\n\n"
+        "Reply **approve** to apply and verify this contract, or **reject** to discard it."
     )
 
 
@@ -215,11 +233,15 @@ async def handle_nonilion_event(payload: dict[str, Any]) -> None:
             conversations[key]["proposal"] = True
         conversations.setdefault("nonilion-user", {})["proposal"] = True
         conflict_msg = (
-            "## Semantic Collision Detected\n"
-            "- **Auth Agent** changed `User.user_id` to UUID (`string`).\n"
-            "- **Profile Agent** still expects `number`.\n"
-            "- **Proposal**: Migrate dependent Profile callers to UUID v4.\n\n"
-            "Reply **approve** to apply and verify this contract, or **reject** to stop it."
+            "## ⚠️ Semantic Collision Detected (96% Confidence)\n\n"
+            "**Evidence:**\n"
+            "- **Contract Symbol**: `src/user.ts#User.user_id:property`\n"
+            "- **Auth Agent Change**: `user_id` modified from `number` → `string (UUID)`\n"
+            "- **Profile Agent Dependency**: `src/profile.ts` requires `user_id: number`\n"
+            "- **Speculative Merge Check**: Type collision detected in integration seam\n\n"
+            "**Proposal:**\n"
+            "Migrate `Profile Agent` (`src/profile.ts`) callers to UUID v4 to preserve TypeScript contract integrity.\n\n"
+            "Reply **approve** to apply and verify this contract, or **reject** to discard it."
         )
         await send_reply(conflict_msg)
         return
