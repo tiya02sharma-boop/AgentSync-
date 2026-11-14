@@ -289,6 +289,32 @@ pre {
   border-radius: 18px;
   background: rgba(255, 251, 244, 0.72);
   box-shadow: 0 16px 45px rgba(38, 31, 20, 0.06);
+  transition: all 0.3s ease;
+}
+.signal-board.passed {
+  border-color: rgba(78, 167, 122, 0.45);
+  background: rgba(240, 253, 244, 0.85);
+  box-shadow: 0 16px 45px rgba(78, 167, 122, 0.12);
+}
+@media (prefers-color-scheme: dark) {
+  .signal-board.passed {
+    background: rgba(20, 48, 35, 0.35) !important;
+    border-color: rgba(78, 167, 122, 0.45) !important;
+  }
+}
+.signal-board.passed .signal-kicker {
+  color: #397c5a;
+}
+.signal-board.passed .signal-kicker strong {
+  border-left-color: rgba(78, 167, 122, 0.35);
+  color: #397c5a;
+}
+.signal-board.passed .signal-path i {
+  background: rgba(78, 167, 122, 0.5);
+}
+.signal-board.passed .signal-path b {
+  border-color: rgba(78, 167, 122, 0.4);
+  color: #397c5a;
 }
 .signal-kicker {
   display: flex;

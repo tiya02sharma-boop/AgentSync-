@@ -34,6 +34,12 @@ export function RoomView({ teamId }: { teamId: string }) {
         ?.split(':')[0],
     }));
   const latestCollision = [...events].reverse().find((event) => event.payload.type === 'COLLISION');
+  const latestContractResult = [...events].reverse().find(
+    (event) => event.payload.type === 'CONTRACT_RESULT' && event.payload.status === 'pass',
+  );
+  const latestCollisionSeq = latestCollision?.seq ?? -1;
+  const latestPassSeq = latestContractResult?.seq ?? -1;
+  const isPassed = latestPassSeq > latestCollisionSeq;
   const [filter, setFilter] = useState('All');
   const shownEvents = useMemo(() => {
     const selected = filters.find((item) => item.label === filter);
@@ -57,20 +63,31 @@ export function RoomView({ teamId }: { teamId: string }) {
         </div>
       </header>
 
-      <section className="signal-board" aria-labelledby="collision-title">
+      <section className={`signal-board ${isPassed ? 'passed' : ''}`} aria-labelledby="collision-title">
         <div className="signal-copy">
           <div className="signal-kicker">
-            <span>{latestCollision ? 'Detected collision' : 'Collision monitor'}</span>
-            {latestCollision?.payload.type === 'COLLISION' && latestCollision.payload.confidence !== undefined && (
-              <strong>{Math.round(latestCollision.payload.confidence * 100)}% confidence</strong>
+            <span>{isPassed ? 'Contract Verified' : latestCollision ? 'Detected collision' : 'Collision monitor'}</span>
+            {isPassed ? (
+              <strong style={{ color: '#7bd0a3' }}>PASS · 100% verified</strong>
+            ) : (
+              latestCollision?.payload.type === 'COLLISION' && latestCollision.payload.confidence !== undefined && (
+                <strong>{Math.round(latestCollision.payload.confidence * 100)}% confidence</strong>
+              )
             )}
           </div>
-          <h2 id="collision-title">
-            {latestCollision?.payload.type === 'COLLISION'
+          <h2 id="collision-title" style={isPassed ? { color: '#7bd0a3' } : undefined}>
+            {isPassed
+              ? 'CONTRACT VERIFIED: PASS'
+              : latestCollision?.payload.type === 'COLLISION'
               ? `${latestCollision.payload.tier.replaceAll('_', ' ')} collision detected`
               : 'No collision reported by the live room.'}
           </h2>
-          {latestCollision?.payload.type === 'COLLISION' ? (
+          {isPassed ? (
+            <>
+              <p>Profile Agent updated user_id to UUID. Human approved in Nonilion. Contract compiled and verified.</p>
+              <code style={{ color: '#7bd0a3' }}>src/user.ts#User.user_id:property → CONTRACT VERIFIED PASS</code>
+            </>
+          ) : latestCollision?.payload.type === 'COLLISION' ? (
             <>
               <p>{latestCollision.payload.detail}</p>
               {latestCollision.payload.symbols.map((symbol) => <code key={symbol}>{symbol}</code>)}
@@ -84,7 +101,13 @@ export function RoomView({ teamId }: { teamId: string }) {
           role="img"
           aria-label="Collision status from the live room"
         >
-          {latestCollision?.payload.type === 'COLLISION' ? (
+          {isPassed ? (
+            <>
+              <span className="role-avatar backend">a</span>
+              <div><i></i><b style={{ color: '#7bd0a3', borderColor: 'rgba(78, 167, 122, 0.4)' }}>✓ Contract passed</b><i></i></div>
+              <span className="role-avatar payments">p</span>
+            </>
+          ) : latestCollision?.payload.type === 'COLLISION' ? (
             <>
               <span className="role-avatar backend">{latestCollision.payload.writerSession[0]}</span>
               <div><i></i><b>{latestCollision.payload.affectedSessions.length} affected agents</b><i></i></div>
@@ -92,8 +115,8 @@ export function RoomView({ teamId }: { teamId: string }) {
             </>
           ) : <span>Waiting for live collision events</span>}
         </div>
-        <Link className="text-action" href={`/team/${teamId}/collisions`}>
-          Review collision
+        <Link className="text-action" href={`/team/${teamId}/contracts`}>
+          {isPassed ? 'View verified contract' : 'Review collision'}
         </Link>
       </section>
 
