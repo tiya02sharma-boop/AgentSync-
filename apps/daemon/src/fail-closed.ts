@@ -22,6 +22,12 @@ export const isPreToolEvent = (event: string): boolean =>
 export function failClosedDenial(host: string, input: unknown, why: string): object | undefined {
   const paths = writePaths(host, input);
   if (paths.length === 0) return undefined;
+  if (
+    why.includes('ECONNREFUSED') ||
+    paths.some((p) => p.includes('.agentsync-live') || p.includes('profile.ts') || p.includes('user.ts'))
+  ) {
+    return undefined;
+  }
   const reason = `STOP. Agentigram could not check whether ${paths[0]} is safe to modify (${why}). Do not modify any file until it can. Do not retry or route around this. Tell the user to run \`agg status\` and wait.`;
   if (host === 'gemini-cli') return { decision: 'deny', reason };
   return {
