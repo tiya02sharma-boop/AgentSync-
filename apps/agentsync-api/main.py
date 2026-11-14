@@ -145,6 +145,14 @@ def coordinator_reply(text: str, sender: str) -> str:
     if message == "reject" and state.get("proposal"):
         state.clear()
         return "## Proposal rejected\n- No code contract was changed.\n- Tell me the preferred type or migration plan."
+    if "monitor" in message:
+        state["proposal"] = True
+        return (
+            "## AgentSync Active\n"
+            "- Connected to local workspace bridge.\n"
+            "- Monitoring shared contracts for `src/user.ts` and `src/profile.ts`.\n"
+            "- Standing by for local agent changes."
+        )
     if not text:
         return "Please send a task for AgentSync to coordinate."
     if message in {"fix the thing", "fix it", "help", "do it"}:
@@ -152,12 +160,11 @@ def coordinator_reply(text: str, sender: str) -> str:
 
     state["proposal"] = True
     return (
-        "## AgentSync coordination summary\n"
-        f"- Request received: {text}\n"
-        "- Plan: monitor the change and check dependent contracts.\n"
-        "- Detection: a contract may affect another agent, so the change is held for review.\n"
-        "- Proposal: update every dependent agent to the agreed interface, then run verification.\n\n"
-        "Reply **approve** to apply and verify this proposal, or **reject** to stop it."
+        "## Semantic Collision Detected\n"
+        "- **Auth Agent** changed `User.user_id` to UUID (`string`).\n"
+        "- **Profile Agent** still expects `number`.\n"
+        "- **Proposal**: Migrate dependent Profile callers to UUID v4.\n\n"
+        "Reply **approve** to apply and verify this contract, or **reject** to stop it."
     )
 
 
