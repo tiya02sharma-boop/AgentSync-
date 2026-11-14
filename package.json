@@ -14,7 +14,7 @@
     "setup": "node scripts/setup.mjs",
     "bootstrap": "pnpm install && npm --prefix apps/tui ci",
     "dev": "pnpm --parallel --filter @agentigram/simulator --filter @agentigram/web dev",
-    "live": "pnpm --parallel --filter @agentigram/simulator live --filter @agentigram/web dev",
+    "live": "(pnpm --filter @agentigram/simulator run live & pnpm --filter @agentigram/web run dev)",
     "live:setup": "pnpm --filter @agentigram/simulator live:setup",
     "check": "pnpm lint && pnpm typecheck && pnpm test && npm --prefix apps/tui test",
     "build": "pnpm -r build",

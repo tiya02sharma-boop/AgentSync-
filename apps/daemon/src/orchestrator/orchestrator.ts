@@ -114,7 +114,7 @@ export class Orchestrator {
     const state = this.host.state();
     const collision = state.collisions[collisionId];
     const negotiation = state.negotiations[collisionId];
-    if (!collision || collision.status !== 'open') return;
+    if (collision?.status !== 'open') return;
     if (negotiation && SETTLED.has(negotiation.state)) return;
     const writer = state.sessions[collision.writerSession];
     const affected = state.sessions[collision.affectedSessions[0] ?? ''];

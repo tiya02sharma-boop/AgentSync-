@@ -40,15 +40,15 @@ export function loadProfile(user_id: number): Profile {
 }
 `;
 
-function ensureFile(path: string, content: string): void {
-  if (existsSync(path)) return;
+function ensureFile(path: string, content: string, force = false): void {
+  if (existsSync(path) && !force) return;
   mkdirSync(dirname(path), { recursive: true });
   writeFileSync(path, content);
 }
 
-export function setupLiveDemo(): void {
-  ensureFile(authFile, authTemplate);
-  ensureFile(profileFile, profileTemplate);
+export function setupLiveDemo(force = false): void {
+  ensureFile(authFile, authTemplate, force);
+  ensureFile(profileFile, profileTemplate, force);
   console.log(`Live demo folders are ready:\n  Auth:    ${authRoot}\n  Profile: ${profileRoot}`);
 }
 
@@ -56,8 +56,8 @@ function hasUuid(path: string): boolean {
   return /UUID|string/.test(readFileSync(path, 'utf8'));
 }
 
-if (process.argv.includes('--setup')) {
-  setupLiveDemo();
+if (process.argv.includes('--setup') || process.argv.includes('--reset')) {
+  setupLiveDemo(true);
   process.exit(0);
 }
 
@@ -115,7 +115,16 @@ let authConflictRaised = false;
 let profileResolved = false;
 
 function onAuthChange(): void {
-  if (!hasUuid(authFile) || authConflictRaised) return;
+  const isUuid = hasUuid(authFile);
+  if (!isUuid) {
+    if (authConflictRaised) {
+      authConflictRaised = false;
+      profileResolved = false;
+      console.log('[live] auth-agent reset to number. Ready for next conflict test.');
+    }
+    return;
+  }
+  if (authConflictRaised) return;
   authConflictRaised = true;
   submit('auth', 'watcher', { type: 'FILE_WRITE', path: 'src/user.ts', worktree: authRoot });
   submit('auth', 'watcher', {
@@ -157,7 +166,15 @@ function onAuthChange(): void {
 }
 
 function onProfileChange(): void {
-  if (!authConflictRaised || !hasUuid(profileFile) || profileResolved) return;
+  const isUuid = hasUuid(profileFile);
+  if (!isUuid) {
+    if (profileResolved) {
+      profileResolved = false;
+      console.log('[live] profile-agent reset to number.');
+    }
+    return;
+  }
+  if (!authConflictRaised || profileResolved) return;
   profileResolved = true;
   submit('profile', 'watcher', { type: 'FILE_WRITE', path: 'src/profile.ts', worktree: profileRoot });
   submit('profile', 'mcp', { type: 'ACCEPT', collisionId: 'live-user-id' });
