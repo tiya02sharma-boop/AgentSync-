@@ -163,6 +163,16 @@ function onAuthChange(): void {
     },
   });
   console.log('[live] Conflict detected: Auth now uses UUID; Profile still uses number.');
+  const apiUrl = process.env.AGENTSYNC_API_URL || 'http://127.0.0.1:8000';
+  fetch(`${apiUrl.replace(/\/+$/, '')}/webhook/nonilion`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      text: 'Migrate user_id from number to UUID',
+      sender: 'auth-agent',
+      type: 'agent_conflict',
+    }),
+  }).catch(() => {});
 }
 
 function onProfileChange(): void {
