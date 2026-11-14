@@ -172,7 +172,9 @@ function onAuthChange(): void {
       sender: 'auth-agent',
       type: 'agent_conflict',
     }),
-  }).catch(() => {});
+  })
+    .then((res) => console.log(`[live] Dispatched conflict to Nonilion API: status ${res.status}`))
+    .catch((err) => console.error('[live] Failed to notify Nonilion API:', err));
 }
 
 function onProfileChange(): void {

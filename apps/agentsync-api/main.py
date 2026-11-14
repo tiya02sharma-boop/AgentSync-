@@ -86,8 +86,14 @@ def verify_request(headers: Any, body: bytes) -> bool:
     return hmac.compare_digest(received, expected)
 
 
+_last_nonilion_target: dict[str, Any] = {}
+
+
 def prepare_reply_target(payload: dict[str, Any]) -> None:
     """Store this webhook event's reply target for send_reply()."""
+    if payload.get("api_base"):
+        _last_nonilion_target.clear()
+        _last_nonilion_target.update(payload)
     _reply_context.set(payload)
 
 
@@ -99,16 +105,22 @@ async def send_reply(text: str, files: list[str] | None = None) -> None:
     del files
     event = _reply_context.get() or {}
     token = os.getenv("NONILION_BOT_TOKEN")
-    api_base = event.get("api_base")
-    event_type = event.get("type")
+    api_base = event.get("api_base") or _last_nonilion_target.get("api_base")
+    event_type = event.get("type") or _last_nonilion_target.get("type")
     if not token or not isinstance(api_base, str) or not api_base:
+        print(f"Nonilion reply skipped: token={bool(token)} api_base={api_base}")
         return
 
     private = event_type == "console_message"
     endpoint = "inbox" if private else "chat"
     body: dict[str, Any] = {"text": text}
-    if private and event.get("message_id"):
-        body["reply_to"] = event["message_id"]
+    message_id = event.get("message_id") or _last_nonilion_target.get("message_id")
+    if private and message_id:
+        body["reply_to"] = message_id
+    for key in ("channel_id", "room_id", "conversation_id", "session_id"):
+        val = event.get(key) or _last_nonilion_target.get(key)
+        if val:
+            body[key] = val
 
     def post() -> None:
         request = UrlRequest(
@@ -173,6 +185,23 @@ async def handle_nonilion_event(payload: dict[str, Any]) -> None:
     if payload.get("type") == "test":
         return
     prepare_reply_target(payload)
+
+    # Automatic local conflict notification from live-demo bridge:
+    if payload.get("type") == "agent_conflict":
+        print("[AgentSync API] Local conflict detected! Pushing proposal to Nonilion bot.")
+        for key in conversations:
+            conversations[key]["proposal"] = True
+        conversations.setdefault("nonilion-user", {})["proposal"] = True
+        conflict_msg = (
+            "## Semantic Collision Detected\n"
+            "- **Auth Agent** changed `User.user_id` to UUID (`string`).\n"
+            "- **Profile Agent** still expects `number`.\n"
+            "- **Proposal**: Migrate dependent Profile callers to UUID v4.\n\n"
+            "Reply **approve** to apply and verify this contract, or **reject** to stop it."
+        )
+        await send_reply(conflict_msg)
+        return
+
     text, sender = parse_incoming_message(payload)
     await send_reply(coordinator_reply(text, sender))
 
